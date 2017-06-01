@@ -18,6 +18,7 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableArray;
+import com.facebook.react.bridge.WritableMap;
 
 import java.util.ArrayList;
 
@@ -95,8 +96,9 @@ public class ContactsManager extends ReactContextBaseJavaModule {
 
     /**
      * Retrieves <code>thumbnailPath</code> for contact, or <code>null</code> if not available.
+     *
      * @param contactId contact identifier, <code>recordID</code>
-     * @param callback callback
+     * @param callback  callback
      */
     @ReactMethod
     public void getPhotoForId(final String contactId, final Callback callback) {
@@ -321,6 +323,42 @@ public class ContactsManager extends ReactContextBaseJavaModule {
             callback.invoke(); // success
         } catch (Exception e) {
             callback.invoke(e.toString());
+        }
+    }
+
+    /**
+￼    * Finds the name and id of a contact based on the phone number
+     *
+￼    * @param phoneNumber The phone number
+￼    * @param callback The callback function
+￼    */
+    @ReactMethod
+    public void getContactByPhoneNumber(String phoneNumber, Callback callback) {
+        ContentResolver cr = getReactApplicationContext().getContentResolver();
+
+        ContactsProvider contactsProvider = new ContactsProvider(cr);
+        WritableMap contact = contactsProvider.getContactByPhoneNumber(phoneNumber);
+
+        callback.invoke(contact == null ? "Contact not found" : null, contact);
+    }
+
+    /**
+     * Updates the given contact
+     *
+     * @param contact  The contact to update
+     * @param callback The callback function
+     */
+    @ReactMethod
+    public void addContentToContact(ReadableMap contact, Callback callback) {
+        ContentResolver cr = getReactApplicationContext().getContentResolver();
+
+        ContactsProvider contactsProvider = new ContactsProvider(cr);
+        try {
+            contactsProvider.addContentToContact(contact);
+            callback.invoke(null, "Success");
+        } catch (Exception e) {
+            e.printStackTrace();
+            callback.invoke("Contact could not be updated.", e.getMessage());
         }
     }
 

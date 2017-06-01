@@ -1,6 +1,7 @@
 package com.rt2zz.reactnativecontacts;
 
 import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.ContactsContract;
@@ -8,6 +9,8 @@ import android.support.annotation.NonNull;
 import android.text.TextUtils;
 
 import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.ReadableArray;
+import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
 
@@ -277,6 +280,143 @@ public class ContactsProvider {
         return null;
     }
 
+    public WritableMap getContactByPhoneNumber(String numberToFind){
+        Uri uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(numberToFind));
+        Cursor cursor = this.contentResolver.query(uri, new String[]{
+                        ContactsContract.PhoneLookup.DISPLAY_NAME,
+                        ContactsContract.PhoneLookup._ID},
+                null, null, null);
+
+        if (cursor == null) {
+            return null;
+        }
+        String contactName = null;
+        String contactId = null;
+
+        if(cursor.moveToFirst()) {
+            contactName = cursor.getString(cursor.getColumnIndex(ContactsContract.PhoneLookup.DISPLAY_NAME));
+            contactId = String.valueOf(cursor.getLong(cursor.getColumnIndex(ContactsContract.PhoneLookup._ID)));
+        }
+
+        if(cursor != null && !cursor.isClosed()) {
+            cursor.close();
+        }
+
+        // Return null if the contact is not found
+        if(contactId == null)
+            return null;
+
+        WritableMap map = Arguments.createMap();
+        map.putString("displayName", contactName);
+        map.putString("id", contactId);
+        map.putInt("rawContactId", (int) findRawContactId(contactId));
+        return map;
+    }
+
+    /**
+     * Find the Raw contact id based on the contact id
+     * Based on the method by smoak (http://stackoverflow.com/questions/9012263/get-rawcontactid-of-specific-contact-based-off-phonelookup)
+     * @param contactId The contact Id
+     * @return The first Row contact Id
+     */
+    private long findRawContactId(String contactId){
+        long rawContactId = -1;
+        Cursor c = contentResolver.query(ContactsContract.RawContacts.CONTENT_URI,
+                new String[]{ContactsContract.RawContacts._ID},
+                ContactsContract.RawContacts.CONTACT_ID + "=?",
+                new String[]{contactId}, null);
+        try {
+            if (c.moveToFirst()) {
+                rawContactId = c.getLong(0);
+            }
+        } finally {
+            c.close();
+        }
+        return rawContactId;
+    }
+
+    List<Contact.Item> getEmailsFromId(String contactId){
+        // Build the Uri to query to table
+        Uri myMailUri = Uri.withAppendedPath(
+                ContactsContract.CommonDataKinds.Email.CONTENT_URI, contactId);
+
+        // Query the table
+        Cursor emailCursor = this.contentResolver.query(myMailUri, null, null, null, null);
+        List<Contact.Item> emails = new ArrayList<>();
+        try {
+            // Get the phone numbers from the contact
+            for (emailCursor.moveToFirst(); !emailCursor.isAfterLast(); emailCursor.moveToNext()) {
+                emails.add(new Contact.Item(emailCursor.getString(emailCursor.getColumnIndex(Email.LABEL)), emailCursor.getString(emailCursor.getColumnIndex(Email.ADDRESS))));
+                System.out.println("Found email:" + emailCursor.getString(emailCursor.getColumnIndex(Email.ADDRESS)));
+            }
+        } finally {
+            emailCursor.close();
+        }
+        return emails;
+    }
+
+    /**
+     * Inserts the email field into an existing contact
+     * @param raw_contact_id The rowContactId
+     * @param email The email to add
+     * @param type Type of the email (home, work, mobile)
+     * @return The Uri of the newly added email
+     */
+    private Uri insertEmailIntoContact(long raw_contact_id, String email, String type){
+        int emailType;
+        switch (type) {
+            case "home":
+                emailType = Email.TYPE_HOME;
+                break;
+            case "work":
+                emailType = Email.TYPE_WORK;
+                break;
+            case "mobile":
+                emailType = Email.TYPE_MOBILE;
+                break;
+            default:
+                emailType = Email.TYPE_OTHER;
+        }
+
+        ContentValues values = new ContentValues();
+        values.put(ContactsContract.Data.RAW_CONTACT_ID, raw_contact_id);
+        values.put(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE);
+        values.put(ContactsContract.CommonDataKinds.Email.DATA, email);
+        values.put(ContactsContract.CommonDataKinds.Email.TYPE, emailType);
+        return contentResolver.insert(ContactsContract.Data.CONTENT_URI, values);
+    }
+
+    /**
+     * @param c The contact to update
+     *
+     *  <br/><br/><b>Note: </b>This method requires permission <b>android.permission.WRITE_CONTACTS</b><br/>
+     *
+     *  Based on the method by KK_07k11A0585 (http://stackoverflow.com/questions/8490123/how-to-update-existing-contact)
+     */
+    public void addContentToContact(ReadableMap c) {
+        Contact contact = new Contact(c);
+        int rawContactId = c.hasKey("rawContactId") ? c.getInt("rawContactId") : (int) findRawContactId(contact.contactId);
+
+        try
+        {
+            // Add all emails
+            for(Contact.Item email : contact.emails)
+            {
+                // Only add email if it doesn't already exists
+                if(!getEmailsFromId(contact.contactId).contains(email)){
+                    // Otherwise insert the email
+                    this.insertEmailIntoContact(rawContactId, email.value, email.label);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+            throw e;
+        }
+    }
+
+
     private static class Contact {
         private String contactId;
         private String displayName;
@@ -297,6 +437,38 @@ public class ContactsProvider {
         public Contact(String contactId) {
             this.contactId = contactId;
         }
+
+        /**
+         * Constructor that takes a ReadableMap of the contact
+         * @param map The map containing information about the user
+         */
+        public Contact(ReadableMap map) {
+            this.contactId = map.hasKey("recordID") ? map.getString("recordID") : map.getString("id");
+            this.displayName = map.hasKey("displayName") ? map.getString("displayName") : "";
+            this.middleName = map.hasKey("middleName") ? map.getString("middleName") : "";
+            this.givenName = map.hasKey("givenName") ? map.getString("givenName") : "";
+            this.familyName = map.hasKey("familyName") ? map.getString("familyName") : "";
+            this.photoUri = map.hasKey("thumbnailPath") ? map.getString("thumbnailPath") : "";
+            if(map.hasKey("phoneNumbers")){
+                ReadableArray phoneNumbers = map.getArray("phoneNumbers");
+                for(int i = 0; i<phoneNumbers.size(); ++i){
+                    ReadableMap phone = phoneNumbers.getMap(i);
+                    if(phone.hasKey("number") && phone.hasKey("label")){
+                        phones.add(new Contact.Item(phone.getString("label"), phone.getString("number")));
+                    }
+                }
+            }
+            if(map.hasKey("emailAddresses")){
+                ReadableArray emailAddresses = map.getArray("emailAddresses");
+                for(int i = 0; i<emailAddresses.size(); ++i){
+                    ReadableMap email = emailAddresses.getMap(i);
+                    if(email.hasKey("email") && email.hasKey("label")){
+                        emails.add(new Contact.Item(email.getString("label"), email.getString("email")));
+                    }
+                }
+            }
+        }
+
 
         public WritableMap toMap() {
             WritableMap contact = Arguments.createMap();
