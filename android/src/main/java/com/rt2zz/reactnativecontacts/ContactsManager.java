@@ -10,6 +10,7 @@ import android.provider.ContactsContract.CommonDataKinds;
 import android.provider.ContactsContract.CommonDataKinds.Organization;
 import android.provider.ContactsContract.CommonDataKinds.StructuredName;
 import android.provider.ContactsContract.RawContacts;
+import android.telephony.PhoneNumberUtils;
 
 import com.facebook.react.bridge.Callback;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -337,7 +338,12 @@ public class ContactsManager extends ReactContextBaseJavaModule {
         ContentResolver cr = getReactApplicationContext().getContentResolver();
 
         ContactsProvider contactsProvider = new ContactsProvider(cr);
-        WritableMap contact = contactsProvider.getContactByPhoneNumber(phoneNumber);
+
+        WritableMap contact = null;
+
+        if (PhoneNumberUtils.isGlobalPhoneNumber(phoneNumber)) {
+            contact = contactsProvider.getContactByPhoneNumber(phoneNumber);
+        }
 
         callback.invoke(contact == null ? "Contact not found" : null, contact);
     }
